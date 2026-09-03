@@ -4,14 +4,13 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { listarEquipos } from '../services/equiposService';
 import {
-  BASES_GYMKANA,
-  obtenerPuntuacionesGymkana,
-  marcarLlegadaGymkana,
-  evaluarBaseGymkana,
+  obtenerEstadoGymkana,
+  sellarResultadoGymkana,
+  reportarAlertaGymkana,
   suscribirseGymkana,
 } from '../services/gymkanaService';
 import EquipoSelector from '../components/gymkana/EquipoSelector';
-import BaseGymkanaCard from '../components/gymkana/BaseGymkanaCard';
+import PartidoGymkanaActual, { MiniProgresoGymkana } from '../components/gymkana/PartidoGymkanaActual';
 
 export default function GymkanaPage() {
   const { perfil, logout } = useAuth();
@@ -19,9 +18,9 @@ export default function GymkanaPage() {
 
   const [equipos, setEquipos] = useState([]);
   const [equipoSeleccionado, setEquipoSeleccionado] = useState(null);
-  const [registros, setRegistros] = useState([]);
+  const [estado, setEstado] = useState(null);
   const [cargandoEquipos, setCargandoEquipos] = useState(true);
-  const [cargandoRegistros, setCargandoRegistros] = useState(false);
+  const [cargandoEstado, setCargandoEstado] = useState(false);
 
   useEffect(() => {
     listarEquipos()
@@ -31,46 +30,43 @@ export default function GymkanaPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const cargarRegistros = useCallback((equipoId) => {
-    setCargandoRegistros(true);
-    obtenerPuntuacionesGymkana(equipoId)
-      .then(setRegistros)
-      .catch(() => showToast('No se pudieron cargar las bases', 'error'))
-      .finally(() => setCargandoRegistros(false));
+  const cargarEstado = useCallback((equipoId) => {
+    setCargandoEstado(true);
+    obtenerEstadoGymkana(equipoId)
+      .then(setEstado)
+      .catch(() => showToast('No se pudo cargar la ruta de este equipo', 'error'))
+      .finally(() => setCargandoEstado(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     if (!equipoSeleccionado) return;
-    cargarRegistros(equipoSeleccionado.id);
-    const unsubscribe = suscribirseGymkana(equipoSeleccionado.id, () =>
-      cargarRegistros(equipoSeleccionado.id)
-    );
+    cargarEstado(equipoSeleccionado.id);
+    const unsubscribe = suscribirseGymkana(() => cargarEstado(equipoSeleccionado.id));
     return unsubscribe;
-  }, [equipoSeleccionado, cargarRegistros]);
+  }, [equipoSeleccionado, cargarEstado]);
 
-  async function handleMarcarLlegada(baseId) {
+  async function handleCalificar(partidoId, resultado) {
     try {
-      const resultado = await marcarLlegadaGymkana(equipoSeleccionado.id, baseId);
-      showToast(resultado?.mensaje ?? 'Llegada registrada', resultado?.conflicto ? 'warning' : 'success');
-      cargarRegistros(equipoSeleccionado.id);
+      const resultadoRpc = await sellarResultadoGymkana(partidoId, equipoSeleccionado.id, resultado);
+      showToast(
+        resultadoRpc?.mensaje ?? 'Resultado registrado',
+        resultadoRpc?.ya_bloqueado ? 'warning' : 'success'
+      );
+      cargarEstado(equipoSeleccionado.id);
     } catch (err) {
-      showToast(err.message ?? 'Error al registrar la llegada', 'error');
+      showToast(err.message ?? 'Error al registrar el resultado', 'error');
     }
   }
 
-  async function handleEvaluar(baseId, resultadoValor) {
+  async function handleReportarAlerta(partidoId) {
     try {
-      const resultado = await evaluarBaseGymkana(equipoSeleccionado.id, baseId, resultadoValor);
-      showToast(resultado?.mensaje ?? 'Evaluación registrada', resultado?.conflicto ? 'warning' : 'success');
-      cargarRegistros(equipoSeleccionado.id);
+      await reportarAlertaGymkana(partidoId);
+      showToast('Alerta enviada al Admin', 'warning');
+      cargarEstado(equipoSeleccionado.id);
     } catch (err) {
-      showToast(err.message ?? 'Error al evaluar la base', 'error');
+      showToast(err.message ?? 'No se pudo reportar la alerta', 'error');
     }
-  }
-
-  function registroDeBase(baseId) {
-    return registros.find((r) => r.base_id === baseId) ?? null;
   }
 
   return (
@@ -103,25 +99,26 @@ export default function GymkanaPage() {
 
         {equipoSeleccionado && (
           <section className="space-y-3">
-            <h2 className="font-semibold text-gray-700">
-              Bases — {equipoSeleccionado.nombre}
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-gray-700">
+                Ruta — {equipoSeleccionado.nombre}
+              </h2>
+              {estado && <MiniProgresoGymkana recorrido={estado.recorrido} />}
+            </div>
 
-            {cargandoRegistros ? (
+            {cargandoEstado ? (
               <div className="flex justify-center py-10">
                 <Loader2 className="animate-spin text-indigo-600" size={28} />
               </div>
             ) : (
-              BASES_GYMKANA.map((baseId) => (
-                <BaseGymkanaCard
-                  key={baseId}
-                  baseId={baseId}
-                  registro={registroDeBase(baseId)}
-                  equipoColor={equipoSeleccionado.color_hex}
-                  onMarcarLlegada={handleMarcarLlegada}
-                  onEvaluar={handleEvaluar}
-                />
-              ))
+              <PartidoGymkanaActual
+                equipoId={equipoSeleccionado.id}
+                equipoColor={equipoSeleccionado.color_hex}
+                rival={estado?.rival}
+                estado={estado}
+                onCalificar={handleCalificar}
+                onReportarAlerta={handleReportarAlerta}
+              />
             )}
           </section>
         )}

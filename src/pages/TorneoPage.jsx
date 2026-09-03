@@ -1,0 +1,127 @@
+import { useCallback, useEffect, useState } from 'react';
+import { LogOut, Loader2, Shuffle } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+import { listarEquipos } from '../services/equiposService';
+import {
+  listarPartidos,
+  generarPartidos,
+  finalizarPartido,
+  suscribirsePartidos,
+} from '../services/torneoService';
+import PartidoCard from '../components/torneo/PartidoCard';
+
+export default function TorneoPage() {
+  const { perfil, logout } = useAuth();
+  const { showToast } = useToast();
+  const esAdmin = perfil?.rol === 'admin';
+
+  const [equipos, setEquipos] = useState([]);
+  const [partidos, setPartidos] = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [generando, setGenerando] = useState(false);
+
+  const cargarTodo = useCallback(() => {
+    setCargando(true);
+    Promise.all([listarEquipos(), listarPartidos()])
+      .then(([e, p]) => {
+        setEquipos(e);
+        setPartidos(p);
+      })
+      .catch(() => showToast('No se pudo cargar la información del torneo', 'error'))
+      .finally(() => setCargando(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    cargarTodo();
+    const unsubscribe = suscribirsePartidos(cargarTodo);
+    return unsubscribe;
+  }, [cargarTodo]);
+
+  async function handleGenerar() {
+    setGenerando(true);
+    try {
+      await generarPartidos();
+      showToast('Partidos generados', 'success');
+      cargarTodo();
+    } catch (err) {
+      showToast(err.message ?? 'No se pudieron generar los partidos', 'error');
+    } finally {
+      setGenerando(false);
+    }
+  }
+
+  async function handleFinalizar(partidoId, ganador) {
+    try {
+      const resultado = await finalizarPartido(partidoId, ganador);
+      showToast(resultado?.mensaje ?? 'Resultado registrado', resultado?.ok === false ? 'warning' : 'success');
+      cargarTodo();
+    } catch (err) {
+      showToast(err.message ?? 'Error al registrar el resultado', 'error');
+    }
+  }
+
+  function equipoPorId(id) {
+    return equipos.find((e) => e.id === id);
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 pb-10">
+      <header className="bg-white border-b sticky top-0 z-10 px-4 py-3 flex items-center justify-between">
+        <div>
+          <h1 className="font-bold text-gray-900">Árbitros del Torneo</h1>
+          <p className="text-xs text-gray-500">{perfil?.nombre}</p>
+        </div>
+        <button
+          onClick={logout}
+          className="flex items-center gap-1 text-sm text-gray-500 hover:text-red-600"
+        >
+          <LogOut size={16} /> Salir
+        </button>
+      </header>
+
+      <main className="max-w-2xl mx-auto px-4 py-6 space-y-4">
+        {cargando ? (
+          <div className="flex justify-center py-16">
+            <Loader2 className="animate-spin text-indigo-600" size={28} />
+          </div>
+        ) : partidos.length === 0 ? (
+          <div className="text-center space-y-3 bg-white rounded-xl border p-6">
+            <p className="text-gray-500 text-sm">
+              Aún no se han generado los partidos del torneo.
+            </p>
+            {esAdmin ? (
+              <button
+                onClick={handleGenerar}
+                disabled={generando || equipos.length !== 4}
+                className="flex items-center gap-2 mx-auto bg-indigo-600 text-white font-semibold rounded-lg px-4 py-2.5 disabled:opacity-50"
+              >
+                {generando ? <Loader2 className="animate-spin" size={18} /> : <Shuffle size={18} />}
+                Generar los 6 partidos
+              </button>
+            ) : (
+              <p className="text-xs text-gray-400">Pide al Admin que los genere.</p>
+            )}
+            {equipos.length !== 4 && (
+              <p className="text-xs text-amber-600">
+                Se necesitan exactamente 4 equipos creados (hay {equipos.length}).
+              </p>
+            )}
+          </div>
+        ) : (
+          partidos.map((p) => (
+            <PartidoCard
+              key={p.id}
+              partido={p}
+              equipoA={equipoPorId(p.equipo_a_id)}
+              equipoB={equipoPorId(p.equipo_b_id)}
+              esAdmin={esAdmin}
+              onFinalizar={handleFinalizar}
+            />
+          ))
+        )}
+      </main>
+    </div>
+  );
+}
